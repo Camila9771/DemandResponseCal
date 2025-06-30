@@ -289,7 +289,7 @@ def emergency_response_module(Qem, user_clear_prices):
 # ==================== Streamlit 应用界面 ====================
 
 def main():
-    st.title("⚡ 电力需求响应收益计算系统")
+    st.title("工业企业参与需求响应的收益测算工具")
     st.markdown("---")
     
     # 侧边栏选择
