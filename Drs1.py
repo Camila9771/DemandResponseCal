@@ -4,7 +4,7 @@ import pandas as pd
 
 # 页面配置
 st.set_page_config(
-    page_title="电力需求响应收益计算系统",
+    page_title="工业企业参与需求响应的收益测算工具",
     page_icon="⚡",
     layout="wide"
 )
