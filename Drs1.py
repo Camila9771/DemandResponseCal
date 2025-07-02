@@ -11,6 +11,19 @@ st.set_page_config(
 
 # ==================== 基础函数 ====================
 
+def trimmed_mean(data):
+    """
+    去掉最大值和最小值后求平均值
+    如果数据长度小于等于2，则直接求平均值
+    """
+    data = np.array(data)
+    if len(data) <= 2:
+        return np.mean(data)
+    
+    # 去掉一个最大值和一个最小值
+    sorted_data = np.sort(data)[1:-1]
+    return np.mean(sorted_data)
+
 def effcal(Qbid, Qbaseline, Qoutput):
     """有效容量计算函数"""
     Qbid = np.array(Qbid)
@@ -130,11 +143,14 @@ def MonthActual(Qbidall, DrDay, Qcapacity):
     if not isinstance(DrDay, (int, float)) or DrDay not in [0, 1]:
         raise ValueError("DrDay必须是0或1")
     
+    # 计算Qcapacity去除最大最小值后的平均值
+    Qcaverage = trimmed_mean(Qcapacity)
+    
     if DrDay == 0:
-        Qactual = Qcapacity.copy()
+        Qactual = Qcaverage
     else:
         Qbidall_mean = np.mean(Qbidall)
-        Qactual = np.minimum(Qcapacity, Qbidall_mean)
+        Qactual = min(Qcaverage, Qbidall_mean)
     
     return Qactual
 
@@ -159,27 +175,25 @@ def monthly_reserve_module(AgentState, gamma, Qbidall, DrDay, Qcapacity, user_mo
     user_month_price (float): 月度备用价格
     
     返回:
-    QMonth (numpy.ndarray): 实际备用容量向量
+    QMonth (float): 实际备用容量（标量）
     PMonth (float): 月度备用价格（标量）
-    Pmonth1 (numpy.ndarray): 月度备用价格向量
     base_revenue (float): 基础备用收益
     reserve_revenue (float): 最终用户收益（考虑代理比例）
     actual_gamma (float): 实际使用的代理比例
     
     实现流程:
-    1. 调用基础函数6 MonthActual() → QMonth
-    2. 调用基础函数7 MonthPrice() → PMonth  
-    3. 根据QMonth长度创建Pmonth1向量（每个元素都是PMonth）
-    4. 调用基础函数3 rescal() → 基础备用收益
-    5. 根据代理状态计算最终用户收益：
+    1. 调用基础函数6 MonthActual() → QMonth（标量）
+    2. 调用基础函数7 MonthPrice() → PMonth（标量）
+    3. 计算基础备用收益 = QMonth × PMonth
+    4. 根据代理状态计算最终用户收益：
        - 无代理：用户收益 = 基础收益
        - 有代理：用户收益 = 基础收益 × (1 - gamma)，代理费用 = 基础收益 × gamma
     """
     QMonth = MonthActual(Qbidall, DrDay, Qcapacity)
     PMonth = MonthPrice(user_month_price)
-    time_periods = len(QMonth)
-    Pmonth1 = np.full(time_periods, PMonth)
-    base_revenue = rescal(QMonth, Pmonth1)
+    
+    # 计算基础备用收益（标量乘法）
+    base_revenue = QMonth * PMonth
     
     # 根据代理状态计算最终收益
     if AgentState == 0:
@@ -191,7 +205,7 @@ def monthly_reserve_module(AgentState, gamma, Qbidall, DrDay, Qcapacity, user_mo
         reserve_revenue = base_revenue * (1 - gamma)
         actual_gamma = gamma
     
-    return QMonth, PMonth, Pmonth1, base_revenue, reserve_revenue, actual_gamma
+    return QMonth, PMonth, base_revenue, reserve_revenue, actual_gamma
 
 def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_prices, 
                             agent_mode=None, Pfloor=None, alpha=None, theta=None):
@@ -519,7 +533,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
             Qcapacity = [float(x.strip()) for x in qcapacity_input.split(',')]
             
             # 调用模块
-            QMonth, PMonth, Pmonth1, base_revenue, reserve_revenue, actual_gamma = monthly_reserve_module(
+            QMonth, PMonth, base_revenue, reserve_revenue, actual_gamma = monthly_reserve_module(
                 agent_state, gamma, Qbidall, drday, Qcapacity, user_month_price
             )
             
@@ -528,16 +542,27 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
             
             st.markdown("### 计算结果")
             
-            # 结果表格
-            results_df = pd.DataFrame({
-                '时段': [f'第{i+1}时段' for i in range(len(QMonth))],
-                '实际备用容量 (kW)': QMonth,
-                '月度备用价格 (元/kW)': Pmonth1,
-                '基础时段收益 (元)': QMonth * Pmonth1,
-                '用户时段收益 (元)': (QMonth * Pmonth1) * (1 - actual_gamma if agent_state == 1 else 1.0)
-            })
+            # 结果表格 - 现在QMonth是标量，需要调整显示方式
+            st.markdown("#### 备用容量计算详情")
             
-            st.dataframe(results_df, use_container_width=True)
+            # 显示输入向量的处理过程
+            capacity_df = pd.DataFrame({
+                '时段': [f'第{i+1}时段' for i in range(len(Qcapacity))],
+                '备用容量中标量 (kW)': Qcapacity,
+                '日前响应中标容量 (kW)': Qbidall if len(Qbidall) == len(Qcapacity) else ['—'] * len(Qcapacity)
+            })
+            st.dataframe(capacity_df, use_container_width=True)
+            
+            # 显示处理结果
+            if len(Qcapacity) > 2:
+                sorted_capacity = np.sort(Qcapacity)
+                trimmed_capacity = sorted_capacity[1:-1]  # 去掉最大最小值
+                st.info(f"📊 备用容量去除极值处理：去掉最小值{sorted_capacity[0]}kW和最大值{sorted_capacity[-1]}kW，剩余容量平均值：{np.mean(trimmed_capacity):.2f}kW")
+            else:
+                st.info(f"📊 备用容量长度≤2，不去除极值，直接平均：{np.mean(Qcapacity):.2f}kW")
+            
+            if drday == 1:
+                st.info(f"📊 日前响应影响：取备用容量均值({QMonth:.2f}kW)与日前响应均值({np.mean(Qbidall):.2f}kW)的最小值")
             
             # 详细信息
             if agent_state == 0:
@@ -546,7 +571,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
                 with col1:
                     st.metric("月度备用价格", f"{PMonth} 元/kW")
                 with col2:
-                    st.metric("总备用容量", f"{np.sum(QMonth):.2f} kW")
+                    st.metric("实际备用容量", f"{QMonth:.2f} kW")
                 with col3:
                     st.metric("总收益", f"{reserve_revenue:.2f} 元")
             else:
@@ -555,7 +580,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
                 with col1:
                     st.metric("月度备用价格", f"{PMonth} 元/kW")
                 with col2:
-                    st.metric("总备用容量", f"{np.sum(QMonth):.2f} kW")
+                    st.metric("实际备用容量", f"{QMonth:.2f} kW")
                 with col3:
                     st.metric("基础总收益", f"{base_revenue:.2f} 元")
                 with col4:
@@ -566,9 +591,9 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
                 st.markdown("### 代理费用分析")
                 agent_fee = base_revenue - reserve_revenue
                 agent_analysis_df = pd.DataFrame({
-                    '项目': ['基础备用收益', '代理费用', '用户最终收益'],
-                    '金额 (元)': [base_revenue, agent_fee, reserve_revenue],
-                    '比例 (%)': [100, actual_gamma * 100, (1 - actual_gamma) * 100]
+                    '项目': ['实际备用容量', '月度备用价格', '基础备用收益', '代理费用', '用户最终收益'],
+                    '数值': [f'{QMonth:.2f} kW', f'{PMonth} 元/kW', f'{base_revenue:.2f} 元', f'{agent_fee:.2f} 元', f'{reserve_revenue:.2f} 元'],
+                    '比例 (%)': ['—', '—', '100%', f'{actual_gamma * 100:.1f}%', f'{(1 - actual_gamma) * 100:.1f}%']
                 })
                 st.dataframe(agent_analysis_df, use_container_width=True)
                 
