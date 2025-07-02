@@ -365,7 +365,7 @@ def main():
     st.sidebar.markdown("**出清价格设置模式**")
     price_mode = st.sidebar.selectbox(
         "选择出清价格模式",
-        ["默认", "自定义","根据历史数据生成","模拟电力系统估计","一定范围内随机生成"],
+        ["默认", "自定义"],
         key="price_mode"
     )
     
@@ -481,14 +481,14 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
     
     with col1:
         st.markdown("**日前响应中标容量向量 (Qbidall) [kW]**")
-        qbidall_input = st.text_input("格式: ,95,80", value="75,85,95,80", key="qbidall", help="单位：kW")
+        qbidall_input = st.text_input("格式: 19000,20010,20005,19500", value="19000,20010,20005,19500", key="qbidall", help="单位：kW")
         
         st.markdown("**是否启动日前响应 (DrDay)**")
         drday = st.selectbox("选择", [0, 1], format_func=lambda x: "未启动" if x == 0 else "启动", key="drday")
     
     with col2:
         st.markdown("**备用容量中标量向量 (Qcapacity) [kW]**")
-        qcapacity_input = st.text_input("格式: 110,95,140,105", value="110,95,140,105", key="qcapacity", help="单位：kW")
+        qcapacity_input = st.text_input("格式: 19773,19773,20000,20050", value="19773,19773,20000,20050", key="qcapacity", help="单位：kW")
     
     # 检查价格设置
     def is_clear_price_ready():
