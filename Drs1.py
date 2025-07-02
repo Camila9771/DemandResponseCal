@@ -695,14 +695,14 @@ def render_day_ahead_ui(user_clear_prices):
     
     with col1:
         st.markdown("**中标容量向量 (Qb) [kW]**")
-        qb_input = st.text_input("格式: 100,150,200,120", value="100,150,200,120", key="qb", help="单位：kW")
+        qb_input = st.text_input("格式: 19970,19000,19500,19800", value="19970,19000,19500,19800", key="qb", help="单位：kW")
         
         st.markdown("**基线向量 (Qbaseline) [kW]**")
-        qbaseline_input = st.text_input("格式: 0,180,250,140", value="0,180,250,140", key="qbaseline", help="单位：kW")
+        qbaseline_input = st.text_input("格式: 21220,19785,18733,19700", value="21220,19785,18733,19700", key="qbaseline", help="单位：kW")
     
     with col2:
         st.markdown("**负荷向量 (Qoutput) [kW]**")
-        qoutput_input = st.text_input("格式: 0,30,10,25", value="0,30,10,25", key="qoutput", help="单位：kW")
+        qoutput_input = st.text_input("格式: 0,0,100,2500", value="0,0,100,2500", key="qoutput", help="单位：kW")
     
     # 检查所有必需参数
     def is_clear_price_ready():
