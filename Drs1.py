@@ -4,7 +4,7 @@ import pandas as pd
 
 # 页面配置
 st.set_page_config(
-    page_title="工业企业参与需求响应的收益测算工具",
+    page_title="电力需求响应收益计算系统",
     page_icon="⚡",
     layout="wide"
 )
@@ -43,7 +43,7 @@ def clearPrice(length, user_prices=None):
     Pclear (numpy.ndarray): 出清价格向量
     
     计算逻辑:
-    - 如果user_prices为None，使用默认价格 [90,90,90,80,80,90]
+    - 如果user_prices为None，使用默认价格 [1.2,1.2,1.2,1.0,1.0,1.2]
     - 如果user_prices不为None，使用用户输入的价格
     - 当输入价格长度与所需长度不匹配时，自动重复或截取
     """
@@ -52,7 +52,7 @@ def clearPrice(length, user_prices=None):
     
     if user_prices is None:
         # 使用默认价格
-        default_prices = [90, 90, 90, 80, 80, 90]
+        default_prices = [1.2, 1.2, 1.2, 1.0, 1.0, 1.2]
         if length <= len(default_prices):
             Pclear = np.array(default_prices[:length])
         else:
@@ -289,7 +289,7 @@ def emergency_response_module(Qem, user_clear_prices):
 # ==================== Streamlit 应用界面 ====================
 
 def main():
-    st.title("工业企业参与需求响应的收益测算工具")
+    st.title("⚡ 电力需求响应收益计算系统")
     st.markdown("---")
     
     # 侧边栏选择
@@ -371,14 +371,14 @@ def main():
     
     user_clear_prices = None
     if price_mode == "默认":
-        st.sidebar.success("✅ 使用默认出清价格: [90,90,90,80,80,90] 元/kW")
+        st.sidebar.success("✅ 使用默认出清价格: [1.2,1.2,1.2,1.0,1.0,1.2] 元/kW")
         user_clear_prices = None  # None表示使用默认价格
     else:
         # 自定义出清价格输入
         st.sidebar.markdown("**自定义出清价格 (Pclear)** *必填 [元/kW]")
         clear_price_input = st.sidebar.text_input(
             "出清价格向量 (元/kW)", 
-            placeholder="例如: 90,60,20,30", 
+            placeholder="例如: 1.2,1.0,1.5,1.3", 
             help="格式：价格1,价格2,价格3,价格4（用英文逗号分隔，单位：元/kW）",
             key="clear_prices"
         )
@@ -481,7 +481,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
     
     with col1:
         st.markdown("**日前响应中标容量向量 (Qbidall) [kW]**")
-        qbidall_input = st.text_input("格式: 75,85,95,80", value="75,85,95,80", key="qbidall", help="单位：kW")
+        qbidall_input = st.text_input("格式: ,95,80", value="75,85,95,80", key="qbidall", help="单位：kW")
         
         st.markdown("**是否启动日前响应 (DrDay)**")
         drday = st.selectbox("选择", [0, 1], format_func=lambda x: "未启动" if x == 0 else "启动", key="drday")
@@ -612,7 +612,7 @@ def render_day_ahead_ui(user_clear_prices):
             st.markdown("**底价 (Pfloor) [元/kW]** *必填")
             pfloor_input = st.text_input(
                 "底价/固定价格", 
-                placeholder="例如: 50.0",
+                placeholder="例如: 0.8",
                 help="代理模式1为底价，代理模式2为固定价格",
                 key="pfloor_dayahead"
             )
