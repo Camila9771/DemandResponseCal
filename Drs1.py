@@ -365,7 +365,7 @@ def main():
     st.sidebar.markdown("**出清价格设置模式**")
     price_mode = st.sidebar.selectbox(
         "选择出清价格模式",
-        ["默认", "自定义"],
+        ["默认", "自定义","根据历史数据生成","模拟电力系统估计","一定范围内随机生成"],
         key="price_mode"
     )
     
