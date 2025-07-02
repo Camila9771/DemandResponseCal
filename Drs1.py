@@ -365,7 +365,7 @@ def main():
     st.sidebar.markdown("**出清价格设置模式**")
     price_mode = st.sidebar.selectbox(
         "选择出清价格模式",
-        ["默认", "自定义"],
+        ["默认", "自定义","根据历史价格估算","模拟电力系统生成","范围内随机生成"],
         key="price_mode"
     )
     
@@ -829,7 +829,7 @@ def render_emergency_ui(user_clear_prices):
     st.markdown("### 输入参数")
     
     st.markdown("**应急响应容量向量 (Qem) [kW]**")
-    qem_input = st.text_input("格式: 50,80,120,90", value="50,80,120,90", key="qem", help="单位：kW")
+    qem_input = st.text_input("格式: 500,800,1200,900", value="500,800,1200,900", key="qem", help="单位：kW")
     
     # 检查价格设置
     def is_clear_price_ready():
