@@ -1,6 +1,10 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 页面配置
 st.set_page_config(
@@ -44,49 +48,184 @@ def effcal(Qbid, Qbaseline, Qoutput):
     
     return Qeffective
 
-def clearPrice(length, user_prices=None):
+def clearPrice(length, user_prices=None, price_params=None):
     """
-    出清价格计算函数
+    出清价格计算函数（集成随机价格生成功能）
     
     参数:
     length (int): 时段数量
-    user_prices (array-like, optional): 用户输入的价格向量，None时使用默认价格
+    user_prices (array-like or str, optional): 
+        - None: 使用默认价格
+        - 'random': 使用随机生成（需要price_params）
+        - array-like: 用户自定义价格向量
+    price_params (dict, optional): 随机价格生成参数，包含：
+        - base_price: 基准价格
+        - fluctuation: 波动范围
+        - distribution: 分布类型
+        - correlation: 相关性系数
+        - seed: 随机种子
     
     返回:
-    Pclear (numpy.ndarray): 出清价格向量
-    
-    计算逻辑:
-    - 如果user_prices为None，使用默认价格 [1.2,1.2,1.2,1.0,1.0,1.2]
-    - 如果user_prices不为None，使用用户输入的价格
-    - 当输入价格长度与所需长度不匹配时，自动重复或截取
+    tuple: (Pclear, adjustment_info)
+        - Pclear (numpy.ndarray): 出清价格向量
+        - adjustment_info (dict): 调整信息（仅在随机生成时返回）
     """
     if not isinstance(length, int) or length <= 0:
         raise ValueError("时段数量必须是正整数")
     
+    # 价格上下限
+    price_floor = 0.0
+    price_ceiling = 3.0
+    
+    # 判断价格生成模式
     if user_prices is None:
-        # 使用默认价格
+        # 模式1：使用默认价格
         default_prices = [1.2, 1.2, 1.2, 1.0, 1.0, 1.2]
         if length <= len(default_prices):
             Pclear = np.array(default_prices[:length])
         else:
-            # 如果需要的长度超过默认数组，重复使用默认数组
             repeat_times = (length + len(default_prices) - 1) // len(default_prices)
             extended_prices = (default_prices * repeat_times)[:length]
             Pclear = np.array(extended_prices)
-        return Pclear
+        return Pclear, {'mode': 'default', 'adjusted': False}
+    
+    elif user_prices == 'random':
+        # 模式2：随机生成价格
+        if price_params is None:
+            raise ValueError("随机模式需要提供price_params参数")
+        
+        # 提取参数
+        base_prices = price_params.get('base_price', 1.2)
+        fluctuation_range = price_params.get('fluctuation', 0.1)
+        distribution = price_params.get('distribution', 'uniform')
+        correlation = price_params.get('correlation', 0.0)
+        seed = price_params.get('seed', None)
+        
+        if seed is not None:
+            np.random.seed(seed)
+        
+        # 将基准价格转换为数组
+        if isinstance(base_prices, (int, float)):
+            base_array = np.full(length, base_prices)
+        else:
+            base_array = np.array(base_prices)
+            if len(base_array) < length:
+                repeat_times = (length + len(base_array) - 1) // len(base_array)
+                base_array = np.tile(base_array, repeat_times)[:length]
+            else:
+                base_array = base_array[:length]
+        
+        # 智能调整波动范围
+        effective_ranges = np.zeros(length)
+        adjustment_made = False
+        
+        for i in range(length):
+            if base_array[i] > 0:
+                max_down_range = (base_array[i] - price_floor) / base_array[i]
+                max_up_range = (price_ceiling - base_array[i]) / base_array[i]
+                effective_range = min(fluctuation_range, max_down_range, max_up_range)
+                
+                if effective_range < fluctuation_range:
+                    adjustment_made = True
+                
+                effective_ranges[i] = effective_range
+            else:
+                effective_ranges[i] = 0
+        
+        # 根据分布类型生成价格
+        if distribution == 'uniform':
+            random_prices = np.zeros(length)
+            for i in range(length):
+                lower = base_array[i] * (1 - effective_ranges[i])
+                upper = base_array[i] * (1 + effective_ranges[i])
+                random_prices[i] = np.random.uniform(lower, upper)
+        
+        elif distribution == 'normal':
+            random_prices = np.zeros(length)
+            for i in range(length):
+                mean = base_array[i]
+                std_dev = base_array[i] * effective_ranges[i] / 3
+                
+                attempts = 0
+                while attempts < 100:
+                    price = np.random.normal(mean, std_dev)
+                    if price_floor <= price <= price_ceiling:
+                        random_prices[i] = price
+                        break
+                    attempts += 1
+                else:
+                    random_prices[i] = np.clip(price, price_floor, price_ceiling)
+        
+        elif distribution == 'correlated':
+            random_prices = np.zeros(length)
+            random_prices[0] = base_array[0] * (1 + np.random.uniform(-effective_ranges[0], effective_ranges[0]))
+            
+            for t in range(1, length):
+                eff_range = effective_ranges[t]
+                random_change = np.random.uniform(-eff_range, eff_range)
+                inherited_deviation = (random_prices[t-1] / base_array[t-1] - 1) * correlation
+                new_price = base_array[t] * (1 + inherited_deviation + random_change * (1 - correlation))
+                random_prices[t] = np.clip(new_price, price_floor, price_ceiling)
+        
+        else:
+            raise ValueError(f"不支持的分布类型: {distribution}")
+        
+        Pclear = np.round(random_prices, 3)
+        
+        adjustment_info = {
+            'mode': 'random',
+            'adjusted': adjustment_made,
+            'original_range': fluctuation_range,
+            'effective_range': np.mean(effective_ranges),
+            'base_price': np.mean(base_array)
+        }
+        
+        return Pclear, adjustment_info
+    
     else:
-        # 使用用户输入的价格
+        # 模式3：用户自定义价格
         user_prices = np.array(user_prices)
         if len(user_prices) == length:
-            return user_prices
+            Pclear = user_prices
         elif len(user_prices) < length:
-            # 如果用户输入的价格少于时段数，重复使用
             repeat_times = (length + len(user_prices) - 1) // len(user_prices)
-            extended_prices = np.tile(user_prices, repeat_times)[:length]
-            return extended_prices
+            Pclear = np.tile(user_prices, repeat_times)[:length]
         else:
-            # 如果用户输入的价格多于时段数，截取前面部分
-            return user_prices[:length]
+            Pclear = user_prices[:length]
+        
+        # 检查并限制价格范围
+        original_prices = Pclear.copy()
+        Pclear = np.clip(Pclear, price_floor, price_ceiling)
+        adjusted = not np.array_equal(original_prices, Pclear)
+        
+        return Pclear, {
+            'mode': 'custom',
+            'adjusted': adjusted,
+            'adjusted_count': np.sum(original_prices != Pclear) if adjusted else 0
+        }
+
+def analyze_price_statistics(prices, base_prices):
+    """分析生成价格的统计特性"""
+    base_array = np.array(base_prices) if isinstance(base_prices, list) else np.full(len(prices), base_prices)
+    if len(base_array) < len(prices):
+        repeat_times = (len(prices) + len(base_array) - 1) // len(base_array)
+        base_array = np.tile(base_array, repeat_times)[:len(prices)]
+    
+    deviations = (prices - base_array) / base_array * 100  # 百分比偏差
+    
+    stats = {
+        '平均价格': np.mean(prices),
+        '价格标准差': np.std(prices),
+        '最高价格': np.max(prices),
+        '最低价格': np.min(prices),
+        '平均偏离度(%)': np.mean(np.abs(deviations)),
+        '最大上偏(%)': np.max(deviations),
+        '最大下偏(%)': np.min(deviations)
+    }
+    
+    return stats
+
+# ==================== 继续原有的基础函数 ====================
 
 def rescal(Qeffective, Pclear):
     """响应费用计算函数"""
@@ -180,14 +319,6 @@ def monthly_reserve_module(AgentState, gamma, Qbidall, DrDay, Qcapacity, user_mo
     base_revenue (float): 基础备用收益
     reserve_revenue (float): 最终用户收益（考虑代理比例）
     actual_gamma (float): 实际使用的代理比例
-    
-    实现流程:
-    1. 调用基础函数6 MonthActual() → QMonth（标量）
-    2. 调用基础函数7 MonthPrice() → PMonth（标量）
-    3. 计算基础备用收益 = QMonth × PMonth
-    4. 根据代理状态计算最终用户收益：
-       - 无代理：用户收益 = 基础收益
-       - 有代理：用户收益 = 基础收益 × (1 - gamma)，代理费用 = 基础收益 × gamma
     """
     QMonth = MonthActual(Qbidall, DrDay, Qcapacity)
     PMonth = MonthPrice(user_month_price)
@@ -208,7 +339,7 @@ def monthly_reserve_module(AgentState, gamma, Qbidall, DrDay, Qcapacity, user_mo
     return QMonth, PMonth, base_revenue, reserve_revenue, actual_gamma
 
 def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_prices, 
-                            agent_mode=None, Pfloor=None, alpha=None, theta=None):
+                            agent_mode=None, Pfloor=None, alpha=None, theta=None, price_params=None):
     """
     日前响应模块
     
@@ -226,24 +357,6 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
     返回:
     未代理: Qe, Pc, Cres, Cass, Cday
     有代理: Qe, Pc, Puser, Cres, Cass, Cday, agent_mode
-    
-    实现流程:
-    未代理模式:
-    1. effcal() → 有效容量
-    2. clearPrice() → 出清价格
-    3. rescal(有效容量, 出清价格) → 响应费用
-    4. asscal() → 考核费用
-    5. 净收益 = 响应费用 - 考核费用
-    
-    有代理模式:
-    1. effcal() → 有效容量（同未代理）
-    2. clearPrice() → 出清价格（同未代理）
-    2.5. 计算用户价格Puser：
-         - 模式1：userprice(Pfloor, 出清价格, alpha)
-         - 模式2：Puser = Pfloor
-    3. rescal(有效容量, 用户价格) → 响应费用
-    4. asscal() × theta → 考核费用（乘以考核分成比例）
-    5. 净收益 = 响应费用 - 考核费用（同未代理）
     """
     if stateOFagent not in [0, 1]:
         raise ValueError("stateOFagent只能是0（未代理）或1（有代理）")
@@ -252,7 +365,7 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
         # 未代理的处理流程
         Qe = effcal(Qb, Qbaseline, Qoutput)
         time_periods = len(Qb)
-        Pc = clearPrice(time_periods, user_clear_prices)
+        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
         Cres = rescal(Qe, Pc)
         Cass = asscal(Qb, Qe, Pc)
         Cday = Cres - Cass
@@ -266,7 +379,7 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
         
         # 步骤2: 获取出清价格（与未代理相同）
         time_periods = len(Qb)
-        Pc = clearPrice(time_periods, user_clear_prices)
+        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
         
         # 计算用户价格Puser
         if agent_mode == 1:
@@ -290,11 +403,11 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
         
         return Qe, Pc, Puser, Cres, Cass, Cday, agent_mode
 
-def emergency_response_module(Qem, user_clear_prices):
+def emergency_response_module(Qem, user_clear_prices, price_params=None):
     """应急响应收益模块"""
     Qem = np.array(Qem)
     time_periods = len(Qem)
-    Pc = clearPrice(time_periods, user_clear_prices)
+    Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
     Pem = Pc * 0.1
     Cem = rescal(Qem, Pem)
     
@@ -379,15 +492,21 @@ def main():
     st.sidebar.markdown("**出清价格设置模式**")
     price_mode = st.sidebar.selectbox(
         "选择出清价格模式",
-        ["默认", "自定义","根据历史价格估算","模拟电力系统生成","范围内随机生成"],
+        ["默认", "自定义", "范围内随机生成", "根据历史价格估算", "模拟电力系统生成"],
         key="price_mode"
     )
     
+    # 添加价格限制说明
+    st.sidebar.info("💡 系统自动限制价格在 0-3 元/kW 范围内")
+    
     user_clear_prices = None
+    price_params = None  # 存储随机价格生成参数
+    
     if price_mode == "默认":
         st.sidebar.success("✅ 使用默认出清价格: [1.2,1.2,1.2,1.0,1.0,1.2] 元/kW")
         user_clear_prices = None  # None表示使用默认价格
-    else:
+        
+    elif price_mode == "自定义":
         # 自定义出清价格输入
         st.sidebar.markdown("**自定义出清价格 (Pclear)** *必填 [元/kW]")
         clear_price_input = st.sidebar.text_input(
@@ -407,8 +526,104 @@ def main():
         else:
             st.sidebar.warning("📝 请输入自定义出清价格")
             user_clear_prices = None
-    
-    # 备用价格输入提示
+            
+    elif price_mode == "范围内随机生成":
+        st.sidebar.markdown("**随机价格生成参数**")
+        
+        # 基准价格输入
+        base_price_type = st.sidebar.radio(
+            "基准价格类型",
+            ["单一价格", "分时段价格"],
+            key="base_price_type"
+        )
+        
+        if base_price_type == "单一价格":
+            base_price = st.sidebar.number_input(
+                "基准价格 (元/kW)",
+                min_value=0.1,
+                value=1.2,
+                step=0.1,
+                key="single_base_price"
+            )
+        else:
+            base_price_input = st.sidebar.text_input(
+                "分时段基准价格",
+                value="1.2,1.0,1.5",
+                help="用逗号分隔，如: 1.2,1.0,1.5",
+                key="multi_base_price"
+            )
+            try:
+                base_price = [float(x.strip()) for x in base_price_input.split(',')]
+            except:
+                st.sidebar.error("价格格式错误")
+                base_price = 1.2
+        
+        # 波动范围
+        fluctuation = st.sidebar.slider(
+            "价格波动范围 (%)",
+            min_value=0,
+            max_value=50,
+            value=10,
+            help="生成的价格将在基准价格±此百分比范围内波动",
+            key="fluctuation"
+        ) / 100
+        
+        # 智能提示：检查基准价格是否接近边界
+        if base_price_type == "单一价格":
+            if base_price >= 2.5:
+                max_safe_fluctuation = ((3.0 - base_price) / base_price) * 100
+                st.sidebar.warning(f"⚠️ 基准价格接近上限，建议波动范围不超过 {max_safe_fluctuation:.0f}%")
+            elif base_price <= 0.5:
+                max_safe_fluctuation = ((base_price - 0.0) / base_price) * 100
+                st.sidebar.warning(f"⚠️ 基准价格接近下限，建议波动范围不超过 {max_safe_fluctuation:.0f}%")
+        
+        # 高级选项
+        with st.sidebar.expander("高级选项"):
+            distribution = st.sidebar.selectbox(
+                "随机分布类型",
+                ["uniform", "normal", "correlated"],
+                format_func=lambda x: {
+                    "uniform": "均匀分布",
+                    "normal": "正态分布",
+                    "correlated": "相关随机游走"
+                }[x],
+                key="distribution"
+            )
+            
+            correlation = 0.0
+            if distribution == "correlated":
+                correlation = st.sidebar.slider(
+                    "时段相关性",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.5,
+                    help="相邻时段价格的相关程度",
+                    key="correlation"
+                )
+            
+            use_seed = st.sidebar.checkbox("使用固定随机种子", key="use_seed")
+            seed = st.sidebar.number_input("随机种子", value=42, key="seed") if use_seed else None
+        
+        # 存储参数
+        price_params = {
+            'base_price': base_price,
+            'fluctuation': fluctuation,
+            'distribution': distribution,
+            'correlation': correlation,
+            'seed': seed
+        }
+        
+        st.sidebar.info("💡 价格将在计算时根据时段数自动生成")
+        
+    elif price_mode == "根据历史价格估算":
+        st.sidebar.info("🚧 历史价格估算功能开发中...")
+        st.sidebar.markdown("此功能将基于历史数据使用机器学习模型预测价格")
+        user_clear_prices = None
+        
+    elif price_mode == "模拟电力系统生成":
+        st.sidebar.info("🚧 电力系统模拟功能开发中...")
+        st.sidebar.markdown("此功能将基于供需平衡模拟市场出清价格")
+        user_clear_prices = None
     
     # 备用价格输入
     user_month_price = None
@@ -440,17 +655,17 @@ def main():
     else:
         st.sidebar.info("计算应急响应相关收益")
     
-    # 主界面内容 - 改为全宽显示
+    # 主界面内容
     st.header(f"📊 {province}省 - {response_type}")
     
     if response_type == "月度备用模块":
-        render_monthly_reserve_ui(user_clear_prices, user_month_price)
+        render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, price_params)
     elif response_type == "日前响应模块":
-        render_day_ahead_ui(user_clear_prices)
+        render_day_ahead_ui(user_clear_prices, price_mode, price_params)
     else:
-        render_emergency_ui(user_clear_prices)
+        render_emergency_ui(user_clear_prices, price_mode, price_params)
 
-def render_monthly_reserve_ui(user_clear_prices, user_month_price):
+def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, price_params):
     """月度备用模块界面"""
     st.markdown("### 输入参数")
     
@@ -506,12 +721,14 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
     
     # 检查价格设置
     def is_clear_price_ready():
-        if 'price_mode' in st.session_state:
-            if st.session_state.price_mode == "默认":
-                return True
-            else:
-                return user_clear_prices is not None
-        return False
+        if price_mode == "默认":
+            return True
+        elif price_mode == "自定义":
+            return user_clear_prices is not None
+        elif price_mode == "范围内随机生成":
+            return price_params is not None
+        else:
+            return False
     
     price_ready = is_clear_price_ready() and user_month_price is not None
     gamma_ready = agent_state == 0 or (agent_state == 1 and gamma > 0)
@@ -542,7 +759,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
             
             st.markdown("### 计算结果")
             
-            # 结果表格 - 现在QMonth是标量，需要调整显示方式
+            # 结果表格
             st.markdown("#### 备用容量计算详情")
             
             # 显示输入向量的处理过程
@@ -600,7 +817,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price):
         except Exception as e:
             st.error(f"计算错误: {str(e)}")
 
-def render_day_ahead_ui(user_clear_prices):
+def render_day_ahead_ui(user_clear_prices, price_mode, price_params):
     """日前响应模块界面"""
     st.markdown("### 输入参数")
     
@@ -731,12 +948,14 @@ def render_day_ahead_ui(user_clear_prices):
     
     # 检查所有必需参数
     def is_clear_price_ready():
-        if 'price_mode' in st.session_state:
-            if st.session_state.price_mode == "默认":
-                return True
-            else:
-                return user_clear_prices is not None
-        return False
+        if price_mode == "默认":
+            return True
+        elif price_mode == "自定义":
+            return user_clear_prices is not None
+        elif price_mode == "范围内随机生成":
+            return price_params is not None
+        else:
+            return False
     
     price_ready = is_clear_price_ready()
     all_ready = price_ready and (state_agent == 0 or agent_params_ready)
@@ -757,16 +976,57 @@ def render_day_ahead_ui(user_clear_prices):
             Qbaseline = [float(x.strip()) for x in qbaseline_input.split(',')]
             Qoutput = [float(x.strip()) for x in qoutput_input.split(',')]
             
+            # 获取时段数
+            time_periods = len(Qb)
+            
+            # 根据价格模式生成出清价格
+            if price_mode == "范围内随机生成" and price_params:
+                # 使用随机模式调用clearPrice
+                Pc, adjustment_info = clearPrice(time_periods, 'random', price_params)
+                
+                # 提示波动范围调整信息
+                if adjustment_info['adjusted']:
+                    base_val = adjustment_info['base_price']
+                    if base_val >= 2.5:
+                        st.info(f"💡 基准价格({base_val:.2f}元)接近上限，系统已智能调整波动范围以保持价格分布合理性")
+                    elif base_val <= 0.5:
+                        st.info(f"💡 基准价格({base_val:.2f}元)接近下限，系统已智能调整波动范围以保持价格分布合理性")
+                
+                user_clear_prices = Pc.tolist()
+            else:
+                # 使用其他模式
+                user_clear_prices_input = user_clear_prices if price_mode == "自定义" else None
+                Pc, _ = clearPrice(time_periods, user_clear_prices_input)
+            
             # 调用模块
             if state_agent == 0:
                 # 未代理模式
+                # 准备价格参数
+                if price_mode == "范围内随机生成":
+                    clear_prices_arg = 'random'
+                else:
+                    clear_prices_arg = user_clear_prices
+                
                 Qe, Pc, Cres, Cass, Cday = day_ahead_response_module(
-                    state_agent, Qb, Qbaseline, Qoutput, user_clear_prices
+                    state_agent, Qb, Qbaseline, Qoutput, clear_prices_arg, 
+                    price_params=price_params if price_mode == "范围内随机生成" else None
                 )
                 
                 # 显示详细结果
                 st.success("计算完成！")
                 st.markdown("### 计算结果")
+                
+                # 如果使用随机价格，显示统计信息
+                if price_mode == "范围内随机生成":
+                    st.markdown("#### 随机价格生成结果")
+                    stats = analyze_price_statistics(Pc, price_params['base_price'])
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("平均价格", f"{stats['平均价格']:.3f} 元/kW")
+                    with col_stat2:
+                        st.metric("价格标准差", f"{stats['价格标准差']:.3f}")
+                    with col_stat3:
+                        st.metric("价格范围", f"{stats['最低价格']:.3f} - {stats['最高价格']:.3f}")
                 
                 # 结果表格
                 results_df = pd.DataFrame({
@@ -795,14 +1055,33 @@ def render_day_ahead_ui(user_clear_prices):
             
             else:
                 # 有代理模式
+                # 准备价格参数
+                if price_mode == "范围内随机生成":
+                    clear_prices_arg = 'random'
+                else:
+                    clear_prices_arg = user_clear_prices
+                
                 Qe, Pc, Puser, Cres, Cass, Cday, used_agent_mode = day_ahead_response_module(
-                    state_agent, Qb, Qbaseline, Qoutput, user_clear_prices,
-                    agent_mode, Pfloor, alpha, theta
+                    state_agent, Qb, Qbaseline, Qoutput, clear_prices_arg,
+                    agent_mode, Pfloor, alpha, theta,
+                    price_params=price_params if price_mode == "范围内随机生成" else None
                 )
                 
                 # 显示详细结果
                 st.success("计算完成！")
                 st.markdown("### 计算结果")
+                
+                # 如果使用随机价格，显示统计信息
+                if price_mode == "范围内随机生成":
+                    st.markdown("#### 随机价格生成结果")
+                    stats = analyze_price_statistics(Pc, price_params['base_price'])
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("平均价格", f"{stats['平均价格']:.3f} 元/kW")
+                    with col_stat2:
+                        st.metric("价格标准差", f"{stats['价格标准差']:.3f}")
+                    with col_stat3:
+                        st.metric("价格范围", f"{stats['最低价格']:.3f} - {stats['最高价格']:.3f}")
                 
                 # 结果表格
                 results_df = pd.DataFrame({
@@ -849,7 +1128,7 @@ def render_day_ahead_ui(user_clear_prices):
         except Exception as e:
             st.error(f"计算错误: {str(e)}")
 
-def render_emergency_ui(user_clear_prices):
+def render_emergency_ui(user_clear_prices, price_mode, price_params):
     """应急响应收益模块界面"""
     st.markdown("### 输入参数")
     
@@ -858,12 +1137,14 @@ def render_emergency_ui(user_clear_prices):
     
     # 检查价格设置
     def is_clear_price_ready():
-        if 'price_mode' in st.session_state:
-            if st.session_state.price_mode == "默认":
-                return True
-            else:
-                return user_clear_prices is not None
-        return False
+        if price_mode == "默认":
+            return True
+        elif price_mode == "自定义":
+            return user_clear_prices is not None
+        elif price_mode == "范围内随机生成":
+            return price_params is not None
+        else:
+            return False
     
     price_ready = is_clear_price_ready()
     
@@ -879,13 +1160,58 @@ def render_emergency_ui(user_clear_prices):
             # 解析输入
             Qem = [float(x.strip()) for x in qem_input.split(',')]
             
+            # 获取时段数
+            time_periods = len(Qem)
+            
+            # 根据价格模式生成出清价格
+            if price_mode == "范围内随机生成" and price_params:
+                # 实时生成随机价格
+                Pc, adjustment_made = generate_random_prices(
+                    price_params['base_price'],
+                    price_params['fluctuation'],
+                    time_periods,
+                    price_params.get('distribution', 'uniform'),
+                    price_params.get('correlation', 0.0),
+                    price_params.get('seed', None)
+                )
+                
+                # 提示波动范围调整信息
+                if adjustment_made:
+                    base_val = price_params['base_price'] if isinstance(price_params['base_price'], (int, float)) else np.mean(price_params['base_price'])
+                    if base_val >= 2.5:
+                        st.info(f"💡 基准价格({base_val:.2f}元)接近上限，系统已智能调整波动范围以保持价格分布合理性")
+                    elif base_val <= 0.5:
+                        st.info(f"💡 基准价格({base_val:.2f}元)接近下限，系统已智能调整波动范围以保持价格分布合理性")
+                
+                user_clear_prices = Pc.tolist()
+            
             # 调用模块
-            Qem_result, Pc, Pem, Cem = emergency_response_module(Qem, user_clear_prices)
+            if price_mode == "范围内随机生成":
+                clear_prices_arg = 'random'
+            else:
+                clear_prices_arg = user_clear_prices
+            
+            Qem_result, Pc, Pem, Cem = emergency_response_module(
+                Qem, clear_prices_arg, 
+                price_params if price_mode == "范围内随机生成" else None
+            )
             
             # 显示详细结果
             st.success("计算完成！")
             
             st.markdown("### 计算结果")
+            
+            # 如果使用随机价格，显示统计信息
+            if price_mode == "范围内随机生成":
+                st.markdown("#### 随机价格生成结果")
+                stats = analyze_price_statistics(Pc, price_params['base_price'])
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                with col_stat1:
+                    st.metric("平均价格", f"{stats['平均价格']:.3f} 元/kW")
+                with col_stat2:
+                    st.metric("价格标准差", f"{stats['价格标准差']:.3f}")
+                with col_stat3:
+                    st.metric("价格范围", f"{stats['最低价格']:.3f} - {stats['最高价格']:.3f}")
             
             # 结果表格
             results_df = pd.DataFrame({
