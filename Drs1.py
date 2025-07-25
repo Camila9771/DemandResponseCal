@@ -1,10 +1,6 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
-matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 页面配置
 st.set_page_config(
