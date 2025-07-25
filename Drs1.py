@@ -1,6 +1,10 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 页面配置
 st.set_page_config(
@@ -221,8 +225,6 @@ def analyze_price_statistics(prices, base_prices):
     
     return stats
 
-# ==================== 继续原有的基础函数 ====================
-
 def rescal(Qeffective, Pclear):
     """响应费用计算函数"""
     Qeffective = np.array(Qeffective)
@@ -289,40 +291,82 @@ def MonthActual(Qbidall, DrDay, Qcapacity):
     
     return Qactual
 
-def MonthPrice(user_price):
-    """月度备用价格计算函数"""
-    if user_price is None:
-        raise ValueError("必须输入月度备用价格")
-    return float(user_price)
+def MonthPrice(user_price, Qcapacity):
+    """
+    月度备用价格计算函数（改进版 - 加权平均）
+    
+    参数:
+    user_price (array-like): 各时段备用价格向量 [元/kW]
+    Qcapacity (array-like): 各时段备用容量向量 [kW]
+    
+    返回:
+    float: 容量加权平均价格 [元/kW]
+    """
+    user_price = np.array(user_price)
+    Qcapacity = np.array(Qcapacity)
+    
+    # 检查输入
+    if len(user_price) != len(Qcapacity):
+        raise ValueError("价格向量和容量向量长度必须相同")
+    
+    if len(user_price) == 0:
+        raise ValueError("输入向量不能为空")
+    
+    # 如果只有1-2个时段，直接计算加权平均
+    if len(Qcapacity) <= 2:
+        return np.average(user_price, weights=Qcapacity)
+    
+    # 找出最大最小容量的索引
+    min_idx = np.argmin(Qcapacity)
+    max_idx = np.argmax(Qcapacity)
+    
+    # 创建保留索引（去除最大最小值）
+    keep_indices = [i for i in range(len(Qcapacity)) 
+                   if i != min_idx and i != max_idx]
+    
+    # 如果最大值或最小值有多个，只去除第一个
+    if min_idx == max_idx:  # 所有值相同的特殊情况
+        keep_indices = list(range(1, len(Qcapacity)))
+    
+    # 提取保留的价格和容量
+    kept_prices = user_price[keep_indices]
+    kept_capacities = Qcapacity[keep_indices]
+    
+    # 计算加权平均价格
+    weighted_avg_price = np.average(kept_prices, weights=kept_capacities)
+    
+    return weighted_avg_price
 
 # ==================== 功能模块 ====================
 
 def monthly_reserve_module(AgentState, gamma, Qbidall, DrDay, Qcapacity, user_month_price):
     """
-    月度备用模块
-    
+    月度备用模块    
     参数:
     AgentState (int): 代理状态（0=无代理，1=有代理）
     gamma (float): 代理比例（0 < gamma < 1，无代理时为0）
     Qbidall (array-like): 日前响应中标容量向量
     DrDay (int): 是否启动日前响应判断变量（0或1）
     Qcapacity (array-like): 备用容量中标量向量
-    user_month_price (float): 月度备用价格
+    user_month_price (array-like): 月度备用价格向量 [元/kW]
     
     返回:
     QMonth (float): 实际备用容量（标量）
-    PMonth (float): 月度备用价格（标量）
+    PMonth (float): 月度备用加权平均价格（标量）
     base_revenue (float): 基础备用收益
     reserve_revenue (float): 最终用户收益（考虑代理比例）
     actual_gamma (float): 实际使用的代理比例
     """
+    # 步骤1：计算实际备用容量
     QMonth = MonthActual(Qbidall, DrDay, Qcapacity)
-    PMonth = MonthPrice(user_month_price)
     
-    # 计算基础备用收益（标量乘法）
+    # 步骤2：计算加权平均月度备用价格
+    PMonth = MonthPrice(user_month_price, Qcapacity)
+    
+    # 步骤3：计算基础备用收益（标量乘法）
     base_revenue = QMonth * PMonth
     
-    # 根据代理状态计算最终收益
+    # 步骤4：根据代理状态计算最终收益
     if AgentState == 0:
         # 无代理情况
         reserve_revenue = base_revenue
@@ -361,7 +405,7 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
         # 未代理的处理流程
         Qe = effcal(Qb, Qbaseline, Qoutput)
         time_periods = len(Qb)
-        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
+        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)
         Cres = rescal(Qe, Pc)
         Cass = asscal(Qb, Qe, Pc)
         Cday = Cres - Cass
@@ -375,7 +419,7 @@ def day_ahead_response_module(stateOFagent, Qb, Qbaseline, Qoutput, user_clear_p
         
         # 步骤2: 获取出清价格（与未代理相同）
         time_periods = len(Qb)
-        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
+        Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)
         
         # 计算用户价格Puser
         if agent_mode == 1:
@@ -403,7 +447,7 @@ def emergency_response_module(Qem, user_clear_prices, price_params=None):
     """应急响应收益模块"""
     Qem = np.array(Qem)
     time_periods = len(Qem)
-    Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)  # 传递price_params
+    Pc, _ = clearPrice(time_periods, user_clear_prices, price_params)
     Pem = Pc * 0.1
     Cem = rescal(Qem, Pem)
     
@@ -468,6 +512,7 @@ def main():
         🏢 **月度备用模块**
         - 支持无代理和有代理两种模式
         - 代理费用 = 基础收益 × γ，用户收益 = 基础收益 × (1-γ)
+        - 月度价格支持分时段设置，按容量加权计算
         
         ⏰ **日前响应模块**  
         - 支持未代理模式和有代理模式
@@ -621,31 +666,32 @@ def main():
         st.sidebar.markdown("此功能将基于供需平衡模拟市场出清价格")
         user_clear_prices = None
     
-    # 备用价格输入
+    # 备用价格输入（改进版）
     user_month_price = None
     if response_type == "月度备用模块":
-        st.sidebar.markdown("**月度备用价格 (Pmonth)** *必填 [元/kW]")
+        st.sidebar.markdown("**月度备用价格向量 (Pmonth)** *必填 [元/kW]")
         month_price_input = st.sidebar.text_input(
-            "月度备用价格 (元/kW)", 
-            placeholder="例如: 5.0",
-            help="输入单个数值，单位：元/kW",
+            "月度备用价格向量 (元/kW)", 
+            placeholder="例如: 5.0,5.2,4.8,5.5",
+            help="格式：价格1,价格2,价格3,价格4（用英文逗号分隔，需与备用容量时段数一致）",
             key="month_price"
         )
         
         if month_price_input.strip():
             try:
-                user_month_price = float(month_price_input.strip())
-                st.sidebar.success(f"✅ 备用价格已设置: {user_month_price} 元/kW")
+                user_month_price = [float(x.strip()) for x in month_price_input.split(',')]
+                st.sidebar.success(f"✅ 备用价格向量已设置: {user_month_price} 元/kW")
+                st.sidebar.info(f"💡 已输入 {len(user_month_price)} 个时段的价格")
             except:
-                st.sidebar.error("❌ 价格格式错误，请输入有效数字")
+                st.sidebar.error("❌ 价格格式错误，请使用逗号分隔的数字")
                 user_month_price = None
         else:
-            st.sidebar.warning("📝 请输入月度备用价格")
+            st.sidebar.warning("📝 请输入月度备用价格向量")
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 💡 说明")
     if response_type == "月度备用模块":
-        st.sidebar.info("计算月度备用容量相关收益\n\n- 无代理：用户获得全部收益\n- 有代理：代理费用=基础收益×γ，用户收益=基础收益×(1-γ)")
+        st.sidebar.info("计算月度备用容量相关收益\n\n- 无代理：用户获得全部收益\n- 有代理：代理费用=基础收益×γ，用户收益=基础收益×(1-γ)\n- 价格计算：去极值后的容量加权平均")
     elif response_type == "日前响应模块":
         st.sidebar.info("计算日前响应相关收益\n\n- 未代理：使用出清价格计算\n- 有代理：使用用户价格计算，支持保底+分成或固定价格模式")
     else:
@@ -662,7 +708,7 @@ def main():
         render_emergency_ui(user_clear_prices, price_mode, price_params)
 
 def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, price_params):
-    """月度备用模块界面"""
+    """月度备用模块界面（改进版）"""
     st.markdown("### 输入参数")
     
     # 代理状态选择
@@ -715,25 +761,46 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, p
         st.markdown("**备用容量中标量向量 (Qcapacity) [kW]**")
         qcapacity_input = st.text_input("格式: 19773,19773,20000,20050", value="19773,19773,20000,20050", key="qcapacity", help="单位：kW")
     
-    # 检查价格设置
-    def is_clear_price_ready():
+    # 检查价格设置和长度匹配
+    def check_inputs_ready():
+        # 检查价格模式
         if price_mode == "默认":
-            return True
+            price_ready = True
         elif price_mode == "自定义":
-            return user_clear_prices is not None
+            price_ready = user_clear_prices is not None
         elif price_mode == "范围内随机生成":
-            return price_params is not None
+            price_ready = price_params is not None
         else:
-            return False
+            price_ready = False
+        
+        # 检查月度价格
+        month_price_ready = user_month_price is not None
+        
+        # 检查长度匹配
+        length_match = True
+        if month_price_ready and qcapacity_input.strip():
+            try:
+                qcap = [float(x.strip()) for x in qcapacity_input.split(',')]
+                if len(user_month_price) != len(qcap):
+                    length_match = False
+            except:
+                length_match = False
+        
+        return price_ready, month_price_ready, length_match
     
-    price_ready = is_clear_price_ready() and user_month_price is not None
+    price_ready, month_price_ready, length_match = check_inputs_ready()
     gamma_ready = agent_state == 0 or (agent_state == 1 and gamma > 0)
-    all_ready = price_ready and gamma_ready
     
     if not price_ready:
-        st.warning("⚠️ 请先在左侧设置出清价格和备用价格")
+        st.warning("⚠️ 请先在左侧设置出清价格")
+    if not month_price_ready:
+        st.warning("⚠️ 请先在左侧设置月度备用价格向量")
+    elif not length_match:
+        st.error("❌ 月度备用价格向量长度必须与备用容量向量长度相同")
     if agent_state == 1 and gamma <= 0:
         st.warning("⚠️ 请设置有效的代理比例")
+    
+    all_ready = price_ready and month_price_ready and length_match and gamma_ready
     
     if st.button("计算月度备用收益", type="primary", disabled=not all_ready):
         if not all_ready:
@@ -755,7 +822,23 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, p
             
             st.markdown("### 计算结果")
             
-            # 结果表格
+            # 月度备用价格分析
+            st.markdown("#### 月度备用价格分析")
+            min_idx = np.argmin(Qcapacity)
+            max_idx = np.argmax(Qcapacity)
+            
+            price_analysis_df = pd.DataFrame({
+                '时段': [f'第{i+1}时段' for i in range(len(Qcapacity))],
+                '备用容量 (kW)': Qcapacity,
+                '备用价格 (元/kW)': user_month_price,
+                '容量×价格': [q*p for q,p in zip(Qcapacity, user_month_price)],
+                '是否参与计算': ['否(最小)' if i==min_idx else '否(最大)' if i==max_idx else '是' 
+                               for i in range(len(Qcapacity))]
+            })
+            st.dataframe(price_analysis_df, use_container_width=True)
+            st.info(f"📊 加权平均价格: {PMonth:.3f} 元/kW（去除容量最大最小时段后）")
+            
+            # 备用容量计算详情
             st.markdown("#### 备用容量计算详情")
             
             # 显示输入向量的处理过程
@@ -782,7 +865,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, p
                 # 无代理情况
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("月度备用价格", f"{PMonth} 元/kW")
+                    st.metric("月度备用价格", f"{PMonth:.3f} 元/kW")
                 with col2:
                     st.metric("实际备用容量", f"{QMonth:.2f} kW")
                 with col3:
@@ -791,7 +874,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, p
                 # 有代理情况
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("月度备用价格", f"{PMonth} 元/kW")
+                    st.metric("月度备用价格", f"{PMonth:.3f} 元/kW")
                 with col2:
                     st.metric("实际备用容量", f"{QMonth:.2f} kW")
                 with col3:
@@ -805,7 +888,7 @@ def render_monthly_reserve_ui(user_clear_prices, user_month_price, price_mode, p
                 agent_fee = base_revenue - reserve_revenue
                 agent_analysis_df = pd.DataFrame({
                     '项目': ['实际备用容量', '月度备用价格', '基础备用收益', '代理费用', '用户最终收益'],
-                    '数值': [f'{QMonth:.2f} kW', f'{PMonth} 元/kW', f'{base_revenue:.2f} 元', f'{agent_fee:.2f} 元', f'{reserve_revenue:.2f} 元'],
+                    '数值': [f'{QMonth:.2f} kW', f'{PMonth:.3f} 元/kW', f'{base_revenue:.2f} 元', f'{agent_fee:.2f} 元', f'{reserve_revenue:.2f} 元'],
                     '比例 (%)': ['—', '—', '100%', f'{actual_gamma * 100:.1f}%', f'{(1 - actual_gamma) * 100:.1f}%']
                 })
                 st.dataframe(agent_analysis_df, use_container_width=True)
@@ -1155,31 +1238,6 @@ def render_emergency_ui(user_clear_prices, price_mode, price_params):
         try:
             # 解析输入
             Qem = [float(x.strip()) for x in qem_input.split(',')]
-            
-            # 获取时段数
-            time_periods = len(Qem)
-            
-            # 根据价格模式生成出清价格
-            if price_mode == "范围内随机生成" and price_params:
-                # 实时生成随机价格
-                Pc, adjustment_made = generate_random_prices(
-                    price_params['base_price'],
-                    price_params['fluctuation'],
-                    time_periods,
-                    price_params.get('distribution', 'uniform'),
-                    price_params.get('correlation', 0.0),
-                    price_params.get('seed', None)
-                )
-                
-                # 提示波动范围调整信息
-                if adjustment_made:
-                    base_val = price_params['base_price'] if isinstance(price_params['base_price'], (int, float)) else np.mean(price_params['base_price'])
-                    if base_val >= 2.5:
-                        st.info(f"💡 基准价格({base_val:.2f}元)接近上限，系统已智能调整波动范围以保持价格分布合理性")
-                    elif base_val <= 0.5:
-                        st.info(f"💡 基准价格({base_val:.2f}元)接近下限，系统已智能调整波动范围以保持价格分布合理性")
-                
-                user_clear_prices = Pc.tolist()
             
             # 调用模块
             if price_mode == "范围内随机生成":
