@@ -147,7 +147,9 @@ $$F_{assess,user,pre} = \sum_{d} \max\left(\sum_{h \in H_d} Q_{bid,user,h} \time
 
 代理用户实际考核费用： 
 
+
 $$F_{assess,user}=(F_{assess,agent,pre}*F_{assess,user,pre}*\theta)/F_{assess,userrelated,pre}$$
+
 
 其中 $F_{assess,userrelated,pre}$ 代表代理商相关代理用户预考核费用  
 
