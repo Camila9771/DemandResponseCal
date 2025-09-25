@@ -70,11 +70,13 @@ $$Q_{actual,h} = \min(Q_{capacity,h}, \overline{Q_{bidall}})$$
 
 $$Q_{actual,h} = \overline{Q_{baseline,h}} - \overline{Q_{output,h}}$$
 
-#### **情况1**：$Q_{actual,h} \leq Q_{bid,h} \times 1.1$
+#### **情况1**：
+$Q_{actual,h} \leq Q_{bid,h} \times 1.1$
 
 $$Q_{effective,h} = Q_{actual,h}$$
 
-#### **情况**2：$Q_{actual,h} > Q_{bid,h} \times 1.1$
+#### **情况**2：
+$Q_{actual,h} > Q_{bid,h} \times 1.1$
 
 $$Q_{effective,h} = Q_{bid,h} \times 1.1 + (Q_{actual,h} - Q_{bid,h} \times 1.1) \times 0.5$$
 
@@ -158,7 +160,7 @@ $$
 
 代理商实际考核费用：
 
-$$F_{assess,agent}=F_{assess,agent,pre}-\sum F_{assess,user,pre}$$
+$$F_{assess,agent}=F_{assess,agent,pre}-\sum_{users} F_{assess,user,pre}$$
 
 #### 4.2.3 净收益
 
