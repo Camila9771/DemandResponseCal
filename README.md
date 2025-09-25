@@ -7,7 +7,7 @@
 - $R_{capacity}$：备用容量收益
 - $R_{response}$：日前响应电量收益
 - $R_{emergency}$：应急响应电量收益
-- $F_{response}$ ：相应费用
+- $F_{response}$ ：响应费用
 - $F_{assess}$ ： 考核费用
 - $C_{capacity}$：备用容量价格
 - $C_{response}$：日前响应价格
