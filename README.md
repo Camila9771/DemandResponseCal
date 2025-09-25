@@ -131,7 +131,7 @@ $$F_{response,agent,h}=Q_{effective,agent,h}*P_{clear,h}$$
 
 $$Q_{effective,agent,h}=\sum_i Q_{effective,user,h}$$
 
-其中$i$代表其代理的用户集合,$Q_{effective,agent,h}$代表代理商有效响应容量
+其中 $i$ 代表其代理的用户集合, $Q_{effective,agent,h}$ 代表代理商有效响应容量
 
 #### 4.2.2 考核费用
 
@@ -190,7 +190,7 @@ $$P_{emergency,h} = P_{clear,h} \times 0.1$$
 
 $$R_{emergency} = \sum_{d} \sum_{h \in H_{emergency,d}} Q_{effective,emergency,h} \times P_{emergency,h}$$
 
-其中，$H_{emergency,d}$ 为第d日的应急响应小时集合。
+其中， $H_{emergency,d}$ 为第d日的应急响应小时集合。
 
 ## 6. 特殊情况处理
 
