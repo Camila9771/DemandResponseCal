@@ -194,7 +194,7 @@ $$R_{emergency} = \sum_{d} \sum_{h \in H_{emergency,d}} Q_{effective,emergency,h
 
 ## 6. 特殊情况处理
 
-民生保障等超过110%不算作有效容量且超出部分要考核
+民生保障等超过110%不算作有效容量且超出部分要考核。
 
 
 
